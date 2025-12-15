@@ -7,17 +7,38 @@ const { updateUserStats } = require("../services/UserStats");
 // POST /swap
 router.post("/swap", async (req, res) => {
   try {
-    const { txHash } = req.body;
-
-    if (!txHash) {
-      return res.status(400).json({ error: "Transaction hash required" });
+    const { userAddress, referalAddress, amount } = req.body;
+    if (!userAddress || !amount) {
+      return res.status(400).json({ error: "userAddress and amount are required" });
     }
-
-    await updateUserStats(txHash);
-
+    if (!ethers.isAddress(userAddress)) {
+      return res.status(400).json({ error: "Invalid userAddress" });
+    }
+    if (referalAddress && !ethers.isAddress(referalAddress)) {
+      return res.status(400).json({ error: "Invalid referalAddress" });
+    }
+    const amountWei = ethers.parseEther(amount.toString());
+    const { tokenSwap, tokenA } = getContracts();
+    const approveTx = await tokenA.approve(
+      await tokenSwap.getAddress(),
+      amountWei
+    );
+    await approveTx.wait();
+    let swapTx;
+    if (referalAddress) {
+      swapTx = await tokenSwap.swapAtoBWithRef(
+        amountWei,
+        referalAddress.toLowerCase()
+      );
+    } else {
+      swapTx = await tokenSwap.swapAtoB(amountWei);
+    }
+    await swapTx.wait();
+    await updateUserStats(userAddress.toLowerCase(), amountWei, referalAddress ? referalAddress.toLowerCase() : null);
     res.json({
       success: true,
-      message: "Stats updated successfully",
+      txHash: swapTx.hash,
+      message: `Swapped ${amount} TokenA for TokenB`,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
